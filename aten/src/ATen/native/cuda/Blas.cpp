@@ -154,6 +154,11 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
   at::ScalarType scalar_type = self.scalar_type();
   c10::MaybeOwned<Tensor> self_;
   if (&result != &self) {
+    static const char* env_value = std::getenv("DISABLE_ADDMM_CUDA_LT");
+    bool disable_addmm_cuda_lt = false;
+    if (env_value != nullptr && strcmp(env_value, "1") == 0) {
+      disable_addmm_cuda_lt = true;
+    }
 #if defined(CUDA_VERSION) && CUDA_VERSION >= 11040 && !defined(_MSC_VER)
     // Strangely, if mat2 has only 1 row or column, we get
     // CUBLAS_STATUS_INVALID_VALUE error from cublasLtMatmulAlgoGetHeuristic.
@@ -163,19 +168,27 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
     // the last two conditions is to skip 16b transA and non-trans-B having
     // leading dim >> rows when they are sliced from a large tensor
     // see fbcode/caffe2/test/test_linalg.py:test_corner_cases_of_cublasltmatmul
-    useLtInterface = beta.toComplexDouble() == 1.0 && self.dim() == 1 &&
-        result.dim() == 2 && self.sizes()[0] == mat2_sizes[1] &&
-        self.is_contiguous() &&
-        (scalar_type == at::ScalarType::Double ||
-         scalar_type == at::ScalarType::Float ||
-         scalar_type == at::ScalarType::Half ||
-         scalar_type == at::ScalarType::BFloat16) &&
-        mat2_sizes[0] > 1 && mat2_sizes[1] > 1 &&
-        mat2_sizes[0] < 65535*32 && mat2_sizes[1] < 65535*32 &&
-        mat1_sizes[0] < 65535*32 && mat1_sizes[1] < 65535*32 &&
-        // avoid leaing dim >> rows bugs
-        ((mat1.strides()[0]==1 && mat1.strides()[1]==mat1_sizes[0]) || (mat1.strides()[1] == 1 && mat1.strides()[0] == mat1_sizes[1]) || (scalar_type != at::ScalarType::Half && scalar_type != at::ScalarType::BFloat16)) &&
-        ((mat2.strides()[0]==1 && mat2.strides()[1]==mat2_sizes[0]) || (mat2.strides()[1] == 1 && mat2.strides()[0] == mat2_sizes[1]) || (scalar_type != at::ScalarType::Half && scalar_type != at::ScalarType::BFloat16));
+    if (!disable_addmm_cuda_lt) {
+      useLtInterface = beta.toComplexDouble() == 1.0 && self.dim() == 1 &&
+          result.dim() == 2 && self.sizes()[0] == mat2_sizes[1] &&
+          self.is_contiguous() &&
+          (scalar_type == at::ScalarType::Double ||
+           scalar_type == at::ScalarType::Float ||
+           scalar_type == at::ScalarType::Half ||
+           scalar_type == at::ScalarType::BFloat16) &&
+          mat2_sizes[0] > 1 && mat2_sizes[1] > 1 &&
+          mat2_sizes[0] < 65535 * 32 && mat2_sizes[1] < 65535 * 32 &&
+          mat1_sizes[0] < 65535 * 32 && mat1_sizes[1] < 65535 * 32 &&
+          // avoid leaing dim >> rows bugs
+          ((mat1.strides()[0] == 1 && mat1.strides()[1] == mat1_sizes[0]) ||
+           (mat1.strides()[1] == 1 && mat1.strides()[0] == mat1_sizes[1]) ||
+           (scalar_type != at::ScalarType::Half &&
+            scalar_type != at::ScalarType::BFloat16)) &&
+          ((mat2.strides()[0] == 1 && mat2.strides()[1] == mat2_sizes[0]) ||
+           (mat2.strides()[1] == 1 && mat2.strides()[0] == mat2_sizes[1]) ||
+           (scalar_type != at::ScalarType::Half &&
+            scalar_type != at::ScalarType::BFloat16));
+    }
 #endif
     if (!useLtInterface) {
       self_ = expand_size(self, {mat1_sizes[0], mat2_sizes[1]}, "addmm");
