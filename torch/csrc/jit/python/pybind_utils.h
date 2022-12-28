@@ -240,6 +240,36 @@ struct VISIBILITY_HIDDEN PythonFutureWrapper
   }
 };
 
+struct VISIBILITY_HIDDEN PythonAwaitWrapper
+    : std::enable_shared_from_this<PythonAwaitWrapper> {
+  explicit PythonAwaitWrapper(c10::intrusive_ptr<c10::ivalue::Await> aw)
+      : aw_(std::move(aw)) {}
+
+  explicit PythonAwaitWrapper(const PythonAwaitWrapper&) = delete;
+  PythonAwaitWrapper& operator=(const PythonAwaitWrapper&) = delete;
+
+  py::object wait() {
+    py::gil_scoped_acquire acquire;
+    py::object py_obj = toPyObject(aw_->wait());
+    return py_obj;
+  }
+
+  void markCompleted(const py::object& pyValue) {
+    DCHECK(PyGILState_Check());
+    IValue value = toIValue(pyValue, PyObjectType::get());
+
+    py::gil_scoped_release release;
+    aw_->markCompleted(std::move(value));
+  }
+
+  c10::intrusive_ptr<c10::ivalue::Await> aw_;
+
+ private:
+  std::shared_ptr<PythonAwaitWrapper> getPtr() {
+    return shared_from_this();
+  }
+};
+
 // error reporting: when reporting user-caused errors, these functions should
 // not use AT_ERROR macros, since these macros add stack trace information
 // that is confusing to display to the end user since it always reports
@@ -337,6 +367,8 @@ inline InferredType tryToInferType(py::handle input) {
   auto enum_type = py::module::import("enum").attr("Enum");
   py::bool_ isEnumValue = py::isinstance(input, enum_type);
   if (py::cast<bool>(isEnumValue)) {
+    std::cout << "XXX " << __FILE__ << ":" << __LINE__ << ":" << __FUNCTION__
+      << std::endl;
     auto enum_class = input.attr("__class__");
     auto enum_type = py::cast<TypePtr>(
         py::module::import("torch.jit.annotations")
@@ -401,6 +433,13 @@ inline InferredType tryToInferType(py::handle input) {
     auto rref_ivalue = input.cast<torch::distributed::rpc::PyRRef>().toIValue();
     return InferredType(rref_ivalue.type());
 #endif
+  }
+
+  auto await_type = py::module::import("torch.awaits").attr("Await");
+  py::bool_ is_await = py::isinstance(input, await_type);
+  if (py::cast<bool>(is_await)) {
+    auto awptr = input.cast<std::shared_ptr<PythonAwaitWrapper>>();
+    return InferredType(AwaitType::create(awptr->aw_->elementType()));
   }
 
   if (as_module(py::cast<py::object>(input))) {
