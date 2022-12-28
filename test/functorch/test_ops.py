@@ -1002,7 +1002,6 @@ class TestOperators(TestCase):
         xfail("native_batch_norm"),
         xfail("_native_batch_norm_legit"),
 
-        xfail('nn.functional.prelu'),
         # ----------------------------------------------------------------------
     }
 
@@ -1288,7 +1287,6 @@ class TestOperators(TestCase):
         xfail("native_batch_norm"),
         xfail("_native_batch_norm_legit"),
         xfail('as_strided', 'partial_views'),
-        xfail('nn.functional.prelu'),
     }))
     def test_vjpvmap(self, device, dtype, op):
         # NB: there is no vjpvmap_has_batch_rule test because that is almost
@@ -1797,7 +1795,6 @@ class TestOperators(TestCase):
         skip('linalg.multi_dot', '', device_type='cpu'),
         skip('sparse.sampled_addmm', ''),
         skip('native_layer_norm', '', device_type='cpu'),
-        xfail('nn.functional.prelu'),
     })
     @opsToleranceOverride('TestOperators', 'test_vmap_autograd_grad', (
         tol1('linalg.householder_product',
